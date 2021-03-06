@@ -1,0 +1,153 @@
+I"�"<p><img src="assets/img/october-htb/htb-oct-icon.png" alt="" /></p>
+
+<p><strong>Hey Guys!</strong> In this blog, we are going to pwn <strong>October</strong> from <a href="https://www.hackthebox.eu">HackTheBox</a>. Before we begin, let me give you a brief overview of what exactly we are going to do :</p>
+<ul>
+  <li>First, we scan the box to find a laravel web application running October CMS.</li>
+  <li>Then we go beyond the admin panel of the CMS after which we upload a php reverse shell.</li>
+  <li>That will give us the access as a low privileged user.</li>
+  <li>Then we escalate our privileges to root by a classic binary exploitation.</li>
+</ul>
+
+<p>With that said, let us begin.</p>
+
+<h1 id="scanning-"><a href="#header-1"></a>SCANNING :</h1>
+<p><img src="assets/img/october-htb/htb-oct-nmap-1.png" alt="" /></p>
+
+<p>A short and quick <strong>nmap</strong> scan reveals ports 22 and 80 to be open.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-nmap-2.png" alt="" /></p>
+
+<p>By the port numbers, as you might have guessed, we have <strong>OpenSSH 6.6.1p1</strong> running on port 22 and <strong>Apache httpd 2.4.7</strong> on port 80.</p>
+
+<p>I do not think we need to know more than this in the scanning phase. Let us now move to enumeration.</p>
+
+<h1 id="enumerating-http"><a href="#header-1"></a>ENUMERATING HTTP:</h1>
+<p>Since HTTP has a large attack vector, let us begin with that first.</p>
+
+<p>By visiting the IP through the browser, we are greeted with the below page:</p>
+
+<p><img src="assets/img/october-htb/htb-oct-web-1.png" alt="" /></p>
+
+<p>By the caption of the heading, we now know this is presented by <strong>October CMS</strong>. There are 3 sub-pages also shown in the navigation bar: <strong>Account</strong>, <strong>Blog</strong> and <strong>Forum</strong>.</p>
+
+<p>Finding nothing interesting here, I decided to fuzz for some directories.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-web-2.png" alt="" /></p>
+
+<p>I am using <strong>wfuzz</strong> to fuzz with some common wordlists of <strong>dirb</strong>.</p>
+
+<p>The <strong>backend</strong> directory looks juicy. Let us check what it has for us.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-web-3.png" alt="" /></p>
+
+<p>We are redirected to <strong>/backend/backend/auth/signin</strong> that is the <strong>admin</strong> login page for <strong>October CMS</strong>. I tried some common credentials that I usually try in such situations like :</p>
+
+<ul>
+  <li>admin:admin</li>
+  <li>admin:password</li>
+  <li>admin:october</li>
+  <li>root:root</li>
+  <li>root:password</li>
+  <li>root:october</li>
+</ul>
+
+<p>However, luckily, the <strong>admin:admin</strong> worked and we are in.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-nmap-4.png" alt="" /></p>
+
+<h1 id="exploitation"><a href="#header-1"></a>EXPLOITATION:</h1>
+
+<p>If we enumerate a little more, we find an upload functionality in <strong>Media</strong> tab.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-web-5.png" alt="" /></p>
+
+<p>Now you know what exactly we have to do ;) Yup, let us upload a <strong>php reverse shell</strong> with <strong>.php5</strong> extension (since there is a file with php5 extension, the box is probably accepting php5 extension files only).</p>
+
+<p><img src="assets/img/october-htb/htb-oct-web-6.png" alt="" /></p>
+
+<p>As you can see, our shell is uploaded. Now we just need to set up a listener and trigger the shell by the link on the right panel.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-1.png" alt="" /></p>
+
+<p>We now have a shell as <strong>www-data</strong>. You can read the user flag from the user’s home directory.</p>
+
+<h1 id="privilege-escalation"><a href="#header-1"></a>PRIVILEGE ESCALATION:</h1>
+
+<p>Let us check for <strong>SUID</strong> set files.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-2.png" alt="" /></p>
+
+<p>Of all the files, the <strong>/usr/local/bin/ovrflw</strong> is odd.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-3.png" alt="" /></p>
+
+<p>The file is owned by <strong>root</strong>. This might be our way to <strong>root</strong>. Let us export it in our local box and play with it a bit.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-4.png" alt="" /></p>
+
+<p>As you can see, when we run the binary with no <strong>command line arguments</strong>, it gives us the message to give one string as input. Next, we run again with a test string, but we see no visual response. However, if we give a sufficiently large input, it causes a <strong>segmentation fault</strong>, proving that there is indeed a <strong>buffer overflow</strong>.</p>
+
+<p>Let us now examine the binary under <strong>GDB</strong>.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-5.png" alt="" /></p>
+
+<p>We load the binary in <strong>GDB</strong> and look for the security enabled in the binary. As you can see, the <strong>NX</strong> bit is disabled. So we can not put a shellcode and execute it from the stack.</p>
+
+<p>In such cases,we can try another technique called <strong>ret-to-libc</strong> technique. In this, we redirect the execution by overwriting the <strong>return address</strong> to <strong>libc</strong> function like <strong>system()</strong> with argument <strong>‘/bin/sh’</strong> to obtain shell.</p>
+
+<p>But for that, we need to find the <strong>offset</strong> to overwrite the <strong>return address</strong>. Let us do that first.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-6.png" alt="" /></p>
+
+<p>I have created a <strong>cyclic pattern</strong> of length <strong>200</strong> and provide it as <strong>CLI</strong> to the binary in GDB. The <strong>Segmentation Fault</strong> occurs at <strong>0x62616164</strong> (<strong>‘daab’</strong>).</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-7.png" alt="" /></p>
+
+<p>With the <strong>EIP</strong> value, we determined the <strong>offset</strong> to be at <strong>112</strong>.</p>
+
+<p>Now its time to find the address for <strong>system</strong>, <strong>exit</strong> and <strong>/bin/sh</strong> in libc.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-8.png" alt="" /></p>
+
+<p>We used the <strong>ldd</strong> utility to find the address for <strong>libc</strong> shared library which is at <strong>0xf7d3d000</strong>. Then we used <strong>readelf</strong> to get the <strong>offset</strong> for <strong>system</strong>, <strong>exit</strong> and <strong>/bin/sh</strong> from <strong>libc</strong>. However, that is just <strong>offset</strong>. The actual address would be :</p>
+
+<h3 id="addr-of-libc--offset">&lt;addr of libc&gt; + &lt;offset&gt;</h3>
+
+<p>Now that we know the addresses, its time to build our fake function call.</p>
+
+<p>This would take the form :</p>
+
+<h3 id="112-as--system-function-addr--exit-function-addr--binsh-string-addr">&lt;112 A’s&gt; + &lt;system function addr&gt; + &lt;exit function addr&gt; + &lt;‘/bin/sh’ string addr&gt;</h3>
+
+<p>The <strong>return address</strong> is first overwritten with <strong>system</strong> function address so the control flows there, then <strong>exit</strong> function address is given as the new return address, next, the argument for <strong>system</strong> function is given which is <strong>‘/bin/sh’</strong>.</p>
+
+<p>Let us build the exploit and run it.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-9.png" alt="" /></p>
+
+<p>Wait! We are supposed to get a shell. Instead we got a <strong>segmentation fault</strong>. Let us debug that and find where exactly we went wrong.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-10.png" alt="" /></p>
+
+<p>When we again check the <strong>libc</strong> address, we find a different address from the one we found a few minutes ago. This indicates that the <strong>ASLR</strong> is on. We verified the same by checking for ASLR.</p>
+
+<p><strong>ASLR</strong> means <strong>Address Space Layout Randomization</strong> which is responsible for making the address of stack, heap, shared libraries and executables in the memory to be random.</p>
+
+<p>Now, how we bypass that? One way is to run the binary in a while loop so that it increases the probability of our exploit to work. Let us try that out.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-11.png" alt="" /></p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-12.png" alt="" /></p>
+
+<p>As you can see, we are successful to pop a <strong>shell</strong>.</p>
+
+<p>Now, playtime on the local box is over. Let us do the same thing on the remote box.</p>
+
+<p><img src="assets/img/october-htb/htb-oct-shell-13.png" alt="" /></p>
+
+<p>And we succeeded to elevate our privileges to <strong>root</strong>. You can read the root flag now too.</p>
+
+<p>So that was it for <strong>October box</strong>. I hope you liked the write-up.</p>
+
+<p><strong>Thanks</strong> for reading this far. I will see you in the next one. <strong>Peace</strong>.</p>
+:ET
